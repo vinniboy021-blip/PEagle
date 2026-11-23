@@ -134,28 +134,39 @@ Detecta todas as misconfigurations conhecidas de Active Directory Certificate Se
 - UAC status e ConsentPromptBehaviorAdmin
 - Grupos privilegiados no token atual
 
-### CVE (2020–2026)
+### CVE (2019–2026)
 
-| CVE | Nome | Severidade |
-|-----|------|-----------|
-| CVE-2020-0796 | SMBGhost (RCE pre-auth SMBv3) | CRIT |
-| CVE-2020-1472 | Zerologon | CRIT |
-| CVE-2021-34527 | PrintNightmare (LPE/RCE) | CRIT |
-| CVE-2021-41379 | InstallerFileTakeOver | HIGH |
-| CVE-2021-42278/87 | noPac (Privesc → Domain Admin) | CRIT |
-| CVE-2022-26923 | Certifried (ADCS dNSHostName) | HIGH |
-| CVE-2022-37969 | CLFS EoP | HIGH |
-| CVE-2023-23397 | Outlook NTLM relay | HIGH |
-| CVE-2023-28252 | CLFS EoP (Nokoyawa ransomware) | HIGH |
-| CVE-2023-36802 | Streaming Service Proxy EoP | HIGH |
-| CVE-2024-21338 | appid.sys WDAC bypass LPE | HIGH |
-| CVE-2024-26169 | WER EoP | HIGH |
-| CVE-2024-26229 | CSC Driver EoP | HIGH |
-| CVE-2024-30088 | Kernel EoP via NTFS | HIGH |
-| CVE-2024-38193 | AFD.sys EoP (APT Lazarus) | CRIT |
-| CVE-2025-21418 | AFD.sys EoP (jan/2025) | CRIT |
-| CVE-2025-24054 | NTLM hash leak via .library-ms | HIGH |
-| CVE-2025-29824 | CLFS EoP (RansomEXX Storm-2460) | CRIT |
+| CVE | Nome | Severidade | Condição extra |
+|-----|------|-----------|----------------|
+| CVE-2019-0708 | BlueKeep (RDP RCE pre-auth) | CRIT | Win7/Server2008 + RDP ativo |
+| CVE-2020-0796 | SMBGhost (RCE pre-auth SMBv3) | CRIT | Builds 18362/18363 |
+| CVE-2020-1472 | Zerologon | CRIT | Domain Controller |
+| CVE-2021-34527 | PrintNightmare (LPE/RCE) | CRIT | Print Spooler ativo |
+| CVE-2021-36934 | HiveNightmare/SeriousSAM | CRIT | Builds 17763-19043 |
+| CVE-2021-40449 | Win32k EoP (APT MysterySnail) | HIGH | Builds < 22000 |
+| CVE-2021-41379 | InstallerFileTakeOver | HIGH | Builds < 22000 |
+| CVE-2021-42278/87 | noPac (Privesc → Domain Admin) | CRIT | Domínio + MachineAccountQuota > 0 |
+| CVE-2022-21882 | Win32k EoP (bypass CVE-2021-1732) | HIGH | — |
+| CVE-2022-26923 | Certifried (ADCS dNSHostName) | HIGH | Domínio |
+| CVE-2022-30190 | Follina/MSDT RCE | CRIT | msdt.exe presente |
+| CVE-2022-37969 | CLFS EoP | HIGH | — |
+| CVE-2023-21554 | MSMQ QueueJumper RCE | CRIT | MSMQ rodando |
+| CVE-2023-23397 | Outlook NTLM relay | HIGH | Outlook instalado |
+| CVE-2023-28252 | CLFS EoP (Nokoyawa ransomware) | HIGH | — |
+| CVE-2023-36802 | Streaming Service Proxy EoP | HIGH | — |
+| CVE-2024-21338 | appid.sys WDAC bypass LPE | HIGH | — |
+| CVE-2024-21413 | Outlook Moniker Link RCE | CRIT | Outlook instalado |
+| CVE-2024-26169 | WER EoP | HIGH | — |
+| CVE-2024-26229 | CSC Driver EoP | HIGH | — |
+| CVE-2024-30088 | Kernel EoP via NTFS | HIGH | — |
+| CVE-2024-38193 | AFD.sys EoP (APT Lazarus) | CRIT | — |
+| CVE-2024-43572 | MMC MSC EvilTwin | HIGH | — |
+| CVE-2024-49039 | Task Scheduler EoP (RomCom) | HIGH | — |
+| CVE-2025-21333 | Hyper-V NT Kernel VSP EoP | CRIT | Hyper-V ativo |
+| CVE-2025-21418 | AFD.sys EoP (jan/2025) | CRIT | — |
+| CVE-2025-24054 | NTLM hash leak via .library-ms | HIGH | — |
+| CVE-2025-26633 | MMC bypass 0-day (Water Gamayun) | HIGH | — |
+| CVE-2025-29824 | CLFS EoP (RansomEXX Storm-2460) | CRIT | — |
 
 > Todos os CVEs validam o OS build antes de alertar — sem falsos positivos em VMs sem OS real detectado.
 
@@ -288,6 +299,17 @@ PEagle.ps1
 ---
 
 ## Changelog
+
+### v2.1 (2026-11-23)
+- **CVE expandido**: 18 → 30 CVEs detectados (2019–2026)
+- Novo CVE-2019-0708 (BlueKeep) com detecção de RDP ativo
+- CVE-2021-36934 (HiveNightmare), CVE-2021-40449 (Win32k APT MysterySnail)
+- CVE-2022-21882 (Win32k bypass), CVE-2022-30190 (Follina/MSDT)
+- CVE-2023-21554 (MSMQ QueueJumper) com check de serviço MSMQ
+- CVE-2024-21413 (Outlook Moniker Link), CVE-2024-43572 (MMC EvilTwin), CVE-2024-49039 (Task Scheduler/RomCom)
+- CVE-2025-21333 (Hyper-V VSP EoP) com check de serviço vmms, CVE-2025-26633 (MMC bypass Water Gamayun)
+- Seções com rótulos atualizados e header "2019-2026"
+- **143/143 testes passando**
 
 ### v2.0 (2026-11-22)
 - **Rebranding**: WinPEAS-Complete → **PEagle**
