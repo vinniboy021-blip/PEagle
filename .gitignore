@@ -1,0 +1,16 @@
+# Binários originais do winPEAS (não fazem parte do PEagle)
+*.exe
+winPEAS.bat
+WinPEAS-Complete.bat
+WinPEAS-Extra.ps1
+WinPEAS-Complete.ps1
+
+# Cópia de trabalho do lab (gerada por cp, não deve ser versionada)
+lab/WinPEAS-Complete.ps1
+lab/PEagle.ps1
+
+# Resultados de testes
+lab/results/
+
+# Backups temporários
+*.bak

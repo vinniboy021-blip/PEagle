@@ -1,0 +1,32 @@
+services:
+  peagle-lab:
+    build:
+      context: ..
+      dockerfile: lab/Dockerfile
+    container_name: peagle-lab
+    volumes:
+      - ../PEagle.ps1:/lab/PEagle.ps1:ro
+      - ./tests:/lab/tests:ro
+      - ./mocks:/lab/mocks:ro
+      - ./results:/lab/results
+    environment:
+      - PAGER=cat
+      - TERM=xterm-256color
+    stdin_open: true
+    tty: true
+
+  # Modo interativo para debug manual
+  peagle-shell:
+    build:
+      context: ..
+      dockerfile: lab/Dockerfile
+    container_name: peagle-shell
+    volumes:
+      - ../PEagle.ps1:/lab/PEagle.ps1:ro
+      - ./tests:/lab/tests:ro
+      - ./mocks:/lab/mocks:ro
+      - ./results:/lab/results
+    entrypoint: ["pwsh", "-NoProfile"]
+    stdin_open: true
+    tty: true
+    profiles: ["shell"]
