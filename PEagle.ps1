@@ -19,8 +19,9 @@
       Containers  — Docker, WSL2, Hyper-V, namespace escapes
       Modern      — Defender exclusoes, Token privileges, WMI subscriptions,
                     AppLocker, COM objects, Named Pipes, UAC, grupos privilegiados
-      CVE         — 18 CVEs com validacao de OS build (SMBGhost, Zerologon,
-                    PrintNightmare, noPac, Certifried, AFD.sys, CLFS EoP e outros)
+      CVE         — 30 CVEs com validacao de OS build (BlueKeep, SMBGhost, Zerologon,
+                    PrintNightmare, HiveNightmare, Follina, noPac, Certifried, MSMQ,
+                    AFD.sys, CLFS EoP, Hyper-V VSP, MMC bypass e outros 2019-2026)
       All         — Todos os modulos em sequencia (contadores unificados)
 
     PARAMETROS:
@@ -207,12 +208,17 @@ function Find-WritablePath {
             $r -match "Everyone[^)]*[:(][^)]*[WMF]" -or
             $r -match "Authenticated Users[^)]*[:(][^)]*[WMF]") { return $true }
     } catch {}
-    # Fallback: Get-Acl (menos preciso — ignora negacoes e heranca denegada)
+    # Fallback: Get-Acl com detecção por SID (locale-safe — funciona em Windows pt-BR, es, etc.)
+    # S-1-1-0=Everyone  S-1-5-11=Authenticated Users  S-1-5-32-545=BUILTIN\Users
+    $lowPrivSids = @("S-1-1-0","S-1-5-11","S-1-5-32-545")
     try {
         $acl = Get-Acl $Path -ErrorAction Stop
         foreach ($ace in $acl.Access) {
-            if ($ace.IdentityReference -match "Users|Everyone|Authenticated Users|BUILTIN\\Users" -and
-                $ace.FileSystemRights  -match "Write|FullControl|Modify") { return $true }
+            $ref = $ace.IdentityReference
+            # Converter NTAccount para SID para comparar de forma independente de locale
+            $sid = try { ($ref.Translate([Security.Principal.SecurityIdentifier])).Value } catch { "" }
+            $isLowPriv = ($lowPrivSids -contains $sid) -or ($ref -match "Users|Everyone|Authenticated Users|BUILTIN\\Users|Usuários|Todos|Authentifizierte")
+            if ($isLowPriv -and $ace.FileSystemRights -match "Write|FullControl|Modify") { return $true }
         }
     } catch {}
     return $false
@@ -372,8 +378,8 @@ function Invoke-SystemChecks {
             $vals.PSObject.Properties | Where-Object { $_.Name -notmatch "^PS" } | ForEach-Object {
                 W-Info "AutoRun [$key]: $($_.Name) = $($_.Value)"
                 # Extrair path do executavel: remover aspas e pegar primeira palavra
-                $rawVal = $_.Value -replace '"', ''
-                $exePath = ($rawVal -split '\s+')[0]
+                # Extrair path preservando espacos: "C:\Program Files\app.exe" /arg -> C:\Program Files\app.exe
+                $exePath = if ($_.Value -match '^"([^"]+)"') { $Matches[1] } else { ($_.Value -split '\s+')[0] }
                 if ($exePath -and $exePath -match '\.' -and (Find-WritablePath $exePath)) {
                     W-High "  -> binario gravavel: $($_.Value)"
                 }
@@ -503,8 +509,10 @@ function Invoke-SystemChecks {
         }
         # Script Block Logging
         $sbl = (Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" -Name "EnableScriptBlockLogging").EnableScriptBlockLogging
-        if ($sbl -eq 1) { W-Med "ScriptBlock Logging ativo — comandos PS sendo logados em Event ID 4104" }
-        else            { W-Ok "ScriptBlock Logging desabilitado" }
+        if ($sbl -eq 1) {
+            W-Med "ScriptBlock Logging ativo — comandos PS sendo logados em Event ID 4104"
+            W-High "OPSEC: a execucao DESTA ferramenta esta sendo gravada nos logs do sistema (Event ID 4104)!"
+        } else { W-Ok "ScriptBlock Logging desabilitado" }
         # Constrained Language Mode
         $clm = $ExecutionContext.SessionState.LanguageMode
         if ($clm -eq "ConstrainedLanguage") { W-Med "ConstrainedLanguage Mode ativo — operacoes PS limitadas" }
@@ -717,8 +725,9 @@ function Invoke-ServicesChecks {
     try {
         $found = $false
         Get-CimInstance Win32_Service | Where-Object { $_.PathName } | ForEach-Object {
-            $raw  = $_.PathName -replace '"',''
-            $exe  = ($raw -split ' ')[0]
+            # Extrair path preservando espacos: "C:\Program Files\svc.exe" -arg -> C:\Program Files\svc.exe
+            $raw = $_.PathName
+            $exe = if ($raw -match '^"([^"]+)"') { $Matches[1] } else { ($raw -split '\s+')[0] }
             if ((Test-Path $exe) -and $exe -notmatch 'system32|SysWOW64|WinSxS') {
                 if (Find-WritablePath $exe) {
                     $sev = if ($_.StartMode -eq "Auto" -and $_.State -eq "Running") { "CRIT" } else { "HIGH" }
@@ -738,7 +747,10 @@ function Invoke-ServicesChecks {
             $svc  = $_
             $sddl = sc.exe sdshow $svc.Name 2>&1
             # RP = Start, WP = Stop, SW = Enumerate — permissoes para todos
-            if ($sddl -match "\(A;;[A-Z]*RP[A-Z]*WP[A-Z]*;;;(WD|BU|IU|AU|LW|S-1-1-0|S-1-5-11|S-1-5-32-545)\)") {
+            # Verificar permissoes perigosas: GA(GenericAll), GW(GenericWrite) ou combinacao RP+WP em qualquer ordem
+            if ($sddl -match "\(A;;[A-Z]*(GA|GW|RPWP|WPRP)[A-Z]*;;;(WD|BU|IU|AU|LW|S-1-1-0|S-1-5-11|S-1-5-32-545)\)" -or
+                ($sddl -match "\(A;;[A-Z]*RP[A-Z]*;;;(WD|BU|IU|AU|S-1-1-0|S-1-5-11|S-1-5-32-545)\)" -and
+                 $sddl -match "\(A;;[A-Z]*WP[A-Z]*;;;(WD|BU|IU|AU|S-1-1-0|S-1-5-11|S-1-5-32-545)\)")) {
                 W-High "Servico '$($svc.Name)' com SDDL permissivo para users comuns"
                 $found = $true
             }
@@ -815,8 +827,8 @@ function Invoke-ServicesChecks {
         Get-CimInstance Win32_Service | Where-Object { $_.State -eq "Running" -and $_.StartMode -eq "Auto" } |
         Select-Object -First 30 | ForEach-Object {
             $sddl = sc.exe sdshow $_.Name 2>&1
-            # CC = ChangeConfig, DC = Delete — perigoso para users comuns
-            if ($sddl -match "\(A;;[A-Z]*CC[A-Z]*;;;(WD|BU|IU|AU|S-1-1-0|S-1-5-11|S-1-5-32-545)\)") {
+            # CC=ChangeConfig, GA=GenericAll — perigoso para users comuns (ordem nao importa)
+            if ($sddl -match "\(A;;[A-Z]*(CC|GA)[A-Z]*;;;(WD|BU|IU|AU|S-1-1-0|S-1-5-11|S-1-5-32-545)\)") {
                 W-Crit "Servico '$($_.Name)' — user comum pode reconfigurar (sc config) = privesc"
                 $found = $true
             }
@@ -1099,10 +1111,17 @@ function Invoke-CredsChecks {
     Get-ChildItem "C:\inetpub" -Recurse -Filter "web.config" | ForEach-Object {
         $filePath = $_.FullName
         try {
-            [xml]$xml = Get-Content $filePath
-            $xml.configuration.connectionStrings.add | Where-Object { $_.connectionString -match "password|pwd|uid=" } |
+            # XmlReaderSettings com DTD desabilitado — previne XXE via web.config malicioso
+            $xrs = New-Object System.Xml.XmlReaderSettings
+            $xrs.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+            $xrs.XmlResolver   = $null
+            $xdoc = New-Object System.Xml.XmlDocument
+            $xdoc.XmlResolver = $null
+            $xreader = [System.Xml.XmlReader]::Create($filePath, $xrs)
+            $xdoc.Load($xreader); $xreader.Close()
+            $xdoc.configuration.connectionStrings.add | Where-Object { $_.connectionString -match "password|pwd|uid=" } |
             ForEach-Object { W-Crit "web.config DB cred ($filePath): $($_.connectionString)" }
-            $xml.configuration.appSettings.add | Where-Object { $_.key -match "pass|secret|token|key|api" -and $_.value } |
+            $xdoc.configuration.appSettings.add | Where-Object { $_.key -match "pass|secret|token|key|api" -and $_.value } |
             ForEach-Object { W-High "web.config appSetting ($filePath): $($_.key) = $($_.value)" }
         } catch {}
     }
@@ -1176,7 +1195,9 @@ function Invoke-CredsChecks {
     Get-ChildItem $sitelistPaths -ErrorAction SilentlyContinue | ForEach-Object {
         W-Crit "McAfee SiteList.xml: $($_.FullName)"
         try {
-            [xml]$sl = Get-Content $_.FullName
+            $xrs2 = New-Object System.Xml.XmlReaderSettings; $xrs2.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit; $xrs2.XmlResolver = $null
+            $sl = New-Object System.Xml.XmlDocument; $sl.XmlResolver = $null
+            $xr2 = [System.Xml.XmlReader]::Create($_.FullName, $xrs2); $sl.Load($xr2); $xr2.Close()
             $sl.SiteLists.SiteList.HTTPSiteSecurity | Where-Object { $_.Enabled -eq "1" } | ForEach-Object {
                 W-Data "Server: $($_.Server) | User: $($_.UserName) | Pass(enc): $($_.Password)"
             }
@@ -1185,7 +1206,7 @@ function Invoke-CredsChecks {
     }
 
     W-Sub "IIS AppCmd — App Pool credentials"
-    $appcmdPaths = @("C:\Windows\System32\inetsrv\appcmd.exe","C:\inetpub\appcmd.exe")
+    $appcmdPaths = @("C:\Windows\System32\inetsrv\appcmd.exe")
     foreach ($ap in $appcmdPaths) {
         if (Test-Path $ap) {
             try {
@@ -2034,8 +2055,8 @@ function Invoke-CVEChecks {
         } catch {}
     }
 
-    # CVE-2021-36934 (HiveNightmare/SeriousSAM): builds 17763-19043 (Win10 1809 ate 21H1)
-    if ($buildKnown -and $osBuild -ge 17763 -and $osBuild -le 19043) {
+    # CVE-2021-36934 (HiveNightmare/SeriousSAM): builds 17763-19045 (Win10 1809 ate 22H2) + Win11 inicial (22000)
+    if ($buildKnown -and $osBuild -ge 17763 -and $osBuild -le 22000) {
         if (-not $hkSet.Contains("KB5004569") -and -not $hkSet.Contains("KB5004570")) {
             W-Crit "CVE-2021-36934 (HiveNightmare/SeriousSAM) — Build $osBuild sem KB5004569 — SAM legivel por usuario comum"
             W-Hint "reg save HKLM\SAM C:\Temp\sam.hive && reg save HKLM\SYSTEM C:\Temp\sys.hive && impacket-secretsdump -sam sam.hive -system sys.hive LOCAL"
