@@ -276,7 +276,6 @@ function Invoke-SystemChecks {
         $hf | ForEach-Object { W-Data "$($_.HotFixID)  $($_.Description)  $($_.InstalledOn)" }
 
         # HiveNightmare — busca no conjunto COMPLETO de KBs, nao apenas nos 15 recentes
-        $os = Get-CimInstance Win32_OperatingSystem
         if ([int]$os.BuildNumber -ge 19041) {
             $kbHive = $allHf | Where-Object { $_.HotFixID -match "KB5004605|KB5003791|KB5004946|KB5004237" }
             if (-not $kbHive) {
@@ -1215,7 +1214,7 @@ function Invoke-CredsChecks {
                 $pools = & $ap list apppool /processModel.userName:* /text:processModel.userName 2>&1
                 $pools | Where-Object { $_ -match "\S" } | ForEach-Object {
                     $user = $_
-                    $pass = & $ap list apppool /processModel.userName:$user /text:processModel.password 2>&1
+                    $pass = & $ap list apppool "/processModel.userName:$user" /text:processModel.password 2>&1
                     W-Crit "IIS AppPool: $user / $pass"
                 }
             } catch {}
@@ -1300,9 +1299,8 @@ function Invoke-ADCSChecks {
         $cas | ForEach-Object { W-Info "CA: $($_.Properties['name'][0]) @ $($_.Properties['dNSHostName'][0])" }
     } catch { W-Info "Erro ao enumerar CAs: $_"; return }
 
-    # Templates
+    # Templates — reutiliza $configNC e $caContainer já obtidos acima
     try {
-        $configNC     = ([ADSI]"LDAP://RootDSE").configurationNamingContext[0]
         $tplContainer = [ADSI]"LDAP://CN=Certificate Templates,CN=Public Key Services,CN=Services,$configNC"
         $templates    = @($tplContainer.Children)
     } catch { W-Info "Erro templates: $_"; return }
@@ -1348,8 +1346,6 @@ function Invoke-ADCSChecks {
     }
 
     W-Sub "ESC6 — EDITF_ATTRIBUTESUBJECTALTNAME2 na CA"
-    $configNC    = ([ADSI]"LDAP://RootDSE").configurationNamingContext[0]
-    $caContainer = [ADSI]"LDAP://CN=Enrollment Services,CN=Public Key Services,CN=Services,$configNC"
     @($caContainer.Children) | ForEach-Object {
         $caName = $_.Properties["name"][0]
         $eflag  = $_.Properties["msPKI-Enrollment-Flag"]
