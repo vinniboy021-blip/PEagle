@@ -310,7 +310,7 @@ PEagle.ps1
 - CVE-2024-21413 (Outlook Moniker Link), CVE-2024-43572 (MMC EvilTwin), CVE-2024-49039 (Task Scheduler/RomCom)
 - CVE-2025-21333 (Hyper-V VSP EoP) com check de serviço vmms, CVE-2025-26633 (MMC bypass Water Gamayun)
 - Seções com rótulos atualizados e header "2019-2026"
-- **143/143 testes passando**
+- **144/144 testes passando**
 
 ### v2.0 (2026-11-22)
 - **Rebranding**: WinPEAS-Complete → **PEagle**

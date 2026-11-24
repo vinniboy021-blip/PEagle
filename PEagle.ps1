@@ -6,7 +6,7 @@
 .DESCRIPTION
     Script de enumeracao de privilege escalation para ambientes Windows.
     Cobre sistema, rede, servicos, credenciais, AD, ADCS (ESC1-ESC17), containers,
-    checks modernos (tokens, pipes, UAC) e 18 CVEs criticos (2020-2026).
+    checks modernos (tokens, pipes, UAC) e 30 CVEs (2019-2026).
 
     MODULOS:
       System      — OS, usuarios, processos, AV/EDR, LSA, WDigest, software
