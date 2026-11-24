@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    PEagle v2 — Enumeracao completa de Windows para Privilege Escalation
+    PEagle v2.1 — Enumeracao completa de Windows para Privilege Escalation
     Autossuficiente: zero dependencias externas. Apenas PowerShell 5.1+.
 
 .DESCRIPTION
@@ -59,11 +59,11 @@
     powershell -ep bypass -File PEagle.ps1 -Module Creds -OutputFormat Csv -OutputFile C:\creds.csv
 
 .NOTES
-    Versao  : 2.0
-    Data    : 2026-11-22
+    Versao  : 2.1
+    Data    : 2026-11-23
     Requer  : PowerShell 5.1+ (PS7 recomendado)
     Privs   : Usuario comum (checks privilegiados sao pulados automaticamente)
-    Lab     : docker run --rm peagle-lab  (132 testes, 0 falhas)
+    Lab     : docker run --rm peagle-lab  (144 testes, 0 falhas)
 #>
 param(
     [ValidateSet("All","System","Network","Services","Creds","AD","ADCS","Containers","Modern","CVE")]
@@ -105,7 +105,7 @@ function W-Banner {
     Write-Host "       | |   | |____  / ____ \| |__| |/ /    " -ForegroundColor Yellow
     Write-Host "       |_|   |______||_/    \_\______/_/     " -ForegroundColor Red
     Write-Host "                                             " -ForegroundColor DarkCyan
-    Write-Host ("  {0,-$W}" -f "  PEagle v2  |  Windows Privilege Escalation Enumeration") -ForegroundColor Cyan
+    Write-Host ("  {0,-$W}" -f "  PEagle v2.1  |  Windows Privilege Escalation Enumeration") -ForegroundColor Cyan
     Write-Host "  $line" -ForegroundColor DarkCyan
     Write-Host ""
 
@@ -747,10 +747,12 @@ function Invoke-ServicesChecks {
             $svc  = $_
             $sddl = sc.exe sdshow $svc.Name 2>&1
             # RP = Start, WP = Stop, SW = Enumerate — permissoes para todos
-            # Verificar permissoes perigosas: GA(GenericAll), GW(GenericWrite) ou combinacao RP+WP em qualquer ordem
-            if ($sddl -match "\(A;;[A-Z]*(GA|GW|RPWP|WPRP)[A-Z]*;;;(WD|BU|IU|AU|LW|S-1-1-0|S-1-5-11|S-1-5-32-545)\)" -or
-                ($sddl -match "\(A;;[A-Z]*RP[A-Z]*;;;(WD|BU|IU|AU|S-1-1-0|S-1-5-11|S-1-5-32-545)\)" -and
-                 $sddl -match "\(A;;[A-Z]*WP[A-Z]*;;;(WD|BU|IU|AU|S-1-1-0|S-1-5-11|S-1-5-32-545)\)")) {
+            # GA/GW = GenericAll/Write; RP+WP em qualquer ordem (outros rights podem estar entre eles em SDDL)
+            $trustees = "(WD|BU|IU|AU|LW|S-1-1-0|S-1-5-11|S-1-5-32-545)"
+            if ($sddl -match "\(A;;[A-Z]*GA[A-Z]*;;;$trustees\)" -or
+                $sddl -match "\(A;;[A-Z]*GW[A-Z]*;;;$trustees\)" -or
+                $sddl -match "\(A;;[A-Z]*RP[A-Z]*WP[A-Z]*;;;$trustees\)" -or
+                $sddl -match "\(A;;[A-Z]*WP[A-Z]*RP[A-Z]*;;;$trustees\)") {
                 W-High "Servico '$($svc.Name)' com SDDL permissivo para users comuns"
                 $found = $true
             }

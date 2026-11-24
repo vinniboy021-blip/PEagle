@@ -1,4 +1,4 @@
-# PEagle v2
+# PEagle v2.1
 
 ```
         ___________                 ___
@@ -8,7 +8,7 @@
        | |   | |____  / ____ \| |__| |/ /
        |_|   |______||_/    \_\______/_/
 
-  v2  |  Windows Privilege Escalation Enumeration
+  v2.1  |  Windows Privilege Escalation Enumeration
 ```
 
 Script PowerShell autossuficiente para enumeração de privilege escalation em Windows.
@@ -274,6 +274,7 @@ docker compose -f lab/docker-compose.yml --profile shell run peagle-shell
 | `04_edr_detection.ps1` | 7 | Detecção por processo (Defender, CrowdStrike, SentinelOne...) |
 | `05_params_validation.ps1` | 19 | ValidateSet, módulos individuais, -OutputFile |
 | `06_adcs_ad.ps1` | 30 | ADCS/AD, ESC9 bug fix, Timestamp, -Fast, ProfileList |
+| **Total** | **144** | 6 arquivos, 0 falhas |
 
 ---
 
