@@ -138,18 +138,17 @@ if (-not $env:TEMP)          { $env:TEMP          = "/tmp" }
 # ── Executaveis externos ──────────────────────────────────────────────────────
 function whoami {
     param($arg)
-    if ($arg -eq "/priv") {
-        return @(
-            "Privilege Name                  Description                    State",
-            "============================    ===========================    =======",
-            "SeImpersonatePrivilege          Impersonate a client           Enabled",
-            "SeDebugPrivilege                Debug programs                 Disabled",
-            "SeChangeNotifyPrivilege         Bypass traverse checking       Enabled"
-        )
-    }
-    if ($arg -eq "/groups") {
-        return @("CORP\Domain Users", "BUILTIN\Users", "NT AUTHORITY\Authenticated Users")
-    }
+    $privLines = @(
+        "Privilege Name                  Description                    State",
+        "============================    ===========================    =======",
+        "SeImpersonatePrivilege          Impersonate a client           Enabled",
+        "SeDebugPrivilege                Debug programs                 Disabled",
+        "SeChangeNotifyPrivilege         Bypass traverse checking       Enabled"
+    )
+    $groupLines = @("CORP\Domain Users", "BUILTIN\Users", "NT AUTHORITY\Authenticated Users")
+    if ($arg -eq "/priv")   { return $privLines }
+    if ($arg -eq "/groups") { return $groupLines }
+    if ($arg -eq "/all")    { return ($groupLines + $privLines) }
     return "$env:USERDOMAIN\$env:USERNAME"
 }
 

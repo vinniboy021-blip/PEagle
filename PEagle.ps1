@@ -201,14 +201,7 @@ function W-Hint { param([string]$msg) Write-Host ("         >> {0}" -f $msg) -Fo
 function Find-WritablePath {
     param([string]$Path)
     if (-not (Test-Path $Path)) { return $false }
-    # Preferir icacls: reflete token do usuario atual (grupos transitivos incluidos)
-    try {
-        $r = icacls $Path 2>$null | Out-String
-        if ($r -match "BUILTIN\\Users[^)]*[:(][^)]*[WMF]" -or
-            $r -match "Everyone[^)]*[:(][^)]*[WMF]" -or
-            $r -match "Authenticated Users[^)]*[:(][^)]*[WMF]") { return $true }
-    } catch {}
-    # Fallback: Get-Acl com detecção por SID (locale-safe — funciona em Windows pt-BR, es, etc.)
+    # Get-Acl com detecção por SID (locale-safe — funciona em Windows pt-BR, es, etc.)
     # S-1-1-0=Everyone  S-1-5-11=Authenticated Users  S-1-5-32-545=BUILTIN\Users
     $lowPrivSids = @("S-1-1-0","S-1-5-11","S-1-5-32-545")
     try {
@@ -276,7 +269,7 @@ function Invoke-SystemChecks {
         $hf | ForEach-Object { W-Data "$($_.HotFixID)  $($_.Description)  $($_.InstalledOn)" }
 
         # HiveNightmare — busca no conjunto COMPLETO de KBs, nao apenas nos 15 recentes
-        if ([int]$os.BuildNumber -ge 19041) {
+        if ($null -ne $os -and [int]$os.BuildNumber -ge 19041) {
             $kbHive = $allHf | Where-Object { $_.HotFixID -match "KB5004605|KB5003791|KB5004946|KB5004237" }
             if (-not $kbHive) {
                 W-High "HiveNightmare (CVE-2021-36934): patch nao detectado — SAM/SYSTEM podem estar legiveis via VSS"
@@ -510,7 +503,7 @@ function Invoke-SystemChecks {
         $sbl = (Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" -Name "EnableScriptBlockLogging").EnableScriptBlockLogging
         if ($sbl -eq 1) {
             W-Med "ScriptBlock Logging ativo — comandos PS sendo logados em Event ID 4104"
-            W-High "OPSEC: a execucao DESTA ferramenta esta sendo gravada nos logs do sistema (Event ID 4104)!"
+            W-Med "OPSEC: a execucao DESTA ferramenta esta sendo gravada nos logs do sistema (Event ID 4104)"
         } else { W-Ok "ScriptBlock Logging desabilitado" }
         # Constrained Language Mode
         $clm = $ExecutionContext.SessionState.LanguageMode
@@ -614,9 +607,11 @@ function Invoke-NetworkChecks {
         }
     } catch { route print 2>&1 | Select-Object -First 30 | ForEach-Object { W-Data $_ } }
 
+    $netstatOut = netstat -ano 2>&1
+
     W-Sub "Portas em escuta (LISTENING)"
     try {
-        $conns = netstat -ano | Where-Object { $_ -match "LISTENING" }
+        $conns = $netstatOut | Where-Object { $_ -match "LISTENING" }
         $conns | ForEach-Object {
             $parts = $_ -split '\s+' | Where-Object { $_ -ne "" }
             if ($parts.Count -ge 5) {
@@ -629,11 +624,11 @@ function Invoke-NetworkChecks {
                 else             { W-Data "       $($localAddr.PadRight(25)) PID $($pid.PadLeft(6))  $procName" }
             }
         }
-    } catch { netstat -ano | ForEach-Object { W-Data $_ } }
+    } catch { $netstatOut | ForEach-Object { W-Data $_ } }
 
     W-Sub "Conexoes estabelecidas"
     try {
-        netstat -ano | Where-Object { $_ -match "ESTABLISHED" } | Select-Object -First 20 |
+        $netstatOut | Where-Object { $_ -match "ESTABLISHED" } | Select-Object -First 20 |
         ForEach-Object { W-Data $_ }
     } catch {}
 
@@ -696,10 +691,12 @@ function Invoke-NetworkChecks {
 function Invoke-ServicesChecks {
     W-Sec "SERVICOS, TASKS E BINARIOS"
 
+    $allSvcs = @(Get-CimInstance Win32_Service -ErrorAction SilentlyContinue)
+
     W-Sub "Servicos — Unquoted Service Path"
     try {
         $found = $false
-        Get-CimInstance Win32_Service | Where-Object { $_.PathName } | ForEach-Object {
+        $allSvcs | Where-Object { $_.PathName } | ForEach-Object {
             $p = $_.PathName
             if ($p -notmatch '^"' -and $p -match ' ' -and $p -match '\.exe' -and $p -notmatch 'system32|SysWOW64') {
                 W-High "Unquoted: '$($_.Name)' (State: $($_.State)) -> $p"
@@ -723,7 +720,7 @@ function Invoke-ServicesChecks {
     W-Sub "Servicos — binario gravavel"
     try {
         $found = $false
-        Get-CimInstance Win32_Service | Where-Object { $_.PathName } | ForEach-Object {
+        $allSvcs | Where-Object { $_.PathName } | ForEach-Object {
             # Extrair path preservando espacos: "C:\Program Files\svc.exe" -arg -> C:\Program Files\svc.exe
             $raw = $_.PathName
             $exe = if ($raw -match '^"([^"]+)"') { $Matches[1] } else { ($raw -split '\s+')[0] }
@@ -739,29 +736,34 @@ function Invoke-ServicesChecks {
         if (-not $found) { W-Ok "Nenhum servico com binario gravavel" }
     } catch { W-Info "Erro binarios: $_" }
 
-    W-Sub "Servicos — permissao fraca na SCM (sc sdshow)"
+    W-Sub "Servicos — permissao fraca na SCM (sc sdshow) e reconfigurar (sc config)"
     try {
-        $found = $false
-        Get-CimInstance Win32_Service | Select-Object -First 50 | ForEach-Object {
+        $foundSddl = $false
+        $foundCfg  = $false
+        $trustees  = "(WD|BU|IU|AU|LW|S-1-1-0|S-1-5-11|S-1-5-32-545)"
+        $allSvcs | Where-Object { $_.StartMode -eq "Auto" -and $_.State -eq "Running" } |
+        Select-Object -First 50 | ForEach-Object {
             $svc  = $_
             $sddl = sc.exe sdshow $svc.Name 2>&1
-            # RP = Start, WP = Stop, SW = Enumerate — permissoes para todos
-            # GA/GW = GenericAll/Write; RP+WP em qualquer ordem (outros rights podem estar entre eles em SDDL)
-            $trustees = "(WD|BU|IU|AU|LW|S-1-1-0|S-1-5-11|S-1-5-32-545)"
             if ($sddl -match "\(A;;[A-Z]*GA[A-Z]*;;;$trustees\)" -or
                 $sddl -match "\(A;;[A-Z]*GW[A-Z]*;;;$trustees\)" -or
                 $sddl -match "\(A;;[A-Z]*RP[A-Z]*WP[A-Z]*;;;$trustees\)" -or
                 $sddl -match "\(A;;[A-Z]*WP[A-Z]*RP[A-Z]*;;;$trustees\)") {
                 W-High "Servico '$($svc.Name)' com SDDL permissivo para users comuns"
-                $found = $true
+                $foundSddl = $true
+            }
+            if ($sddl -match "\(A;;[A-Z]*(CC|GA)[A-Z]*;;;(WD|BU|IU|AU|S-1-1-0|S-1-5-11|S-1-5-32-545)\)") {
+                W-Crit "Servico '$($svc.Name)' — user comum pode reconfigurar (sc config) = privesc"
+                $foundCfg = $true
             }
         }
-        if (-not $found) { W-Ok "Nenhuma permissao SCM perigosa detectada (amostra 50)" }
+        if (-not $foundSddl) { W-Ok "Nenhuma permissao SCM perigosa detectada (Auto+Running, amostra 50)" }
+        if (-not $foundCfg)  { W-Ok "Nenhum servico Auto+Running reconfiguravel por user comum" }
     } catch { W-Info "Erro SCM SDDL: $_" }
 
     W-Sub "Servicos com paths UNC"
     try {
-        Get-CimInstance Win32_Service | Where-Object { $_.PathName -match "^\\\\" } |
+        $allSvcs | Where-Object { $_.PathName -match "^\\\\" } |
         ForEach-Object { W-High "Servico com path UNC: '$($_.Name)' -> $($_.PathName)" }
     } catch {}
 
@@ -821,21 +823,6 @@ function Invoke-ServicesChecks {
             }
         } else { W-Ok "Spooler desativado" }
     } catch { W-Ok "Spooler: servico nao encontrado ou inacessivel" }
-
-    W-Sub "Servicos — permissao de reconfigurar (sc config)"
-    try {
-        $found = $false
-        Get-CimInstance Win32_Service | Where-Object { $_.State -eq "Running" -and $_.StartMode -eq "Auto" } |
-        Select-Object -First 30 | ForEach-Object {
-            $sddl = sc.exe sdshow $_.Name 2>&1
-            # CC=ChangeConfig, GA=GenericAll — perigoso para users comuns (ordem nao importa)
-            if ($sddl -match "\(A;;[A-Z]*(CC|GA)[A-Z]*;;;(WD|BU|IU|AU|S-1-1-0|S-1-5-11|S-1-5-32-545)\)") {
-                W-Crit "Servico '$($_.Name)' — user comum pode reconfigurar (sc config) = privesc"
-                $found = $true
-            }
-        }
-        if (-not $found) { W-Ok "Nenhum servico Auto+Running reconfiguravel por user comum" }
-    } catch { W-Info "Erro sc config check: $_" }
 
     W-Sub "LOLBAS — binarios OS em caminhos graváveis"
     $lolbas = @("mshta.exe","wscript.exe","cscript.exe","rundll32.exe","regsvr32.exe",
@@ -1376,12 +1363,8 @@ function Invoke-ADCSChecks {
 
     W-Sub "ESC9 — CT_FLAG_NO_SECURITY_EXTENSION (szOID_NTDS_CA_SECURITY_EXT desabilitada no template)"
     try {
-        # Busca templates uma unica vez (bug anterior: rodava N vezes dentro do loop de CAs)
-        $tplContainer9 = [ADSI]"LDAP://CN=Certificate Templates,CN=Public Key Services,CN=Services,$configNC"
-        $s9 = New-Object System.DirectoryServices.DirectorySearcher $tplContainer9
-        $s9.Filter = "(objectClass=pKICertificateTemplate)"
-        $s9.PropertiesToLoad.AddRange(@("name","msPKI-Certificate-Name-Flag","msPKI-Enrollment-Flag"))
-        $s9.FindAll() | ForEach-Object {
+        # Reutiliza $templates ja carregado (evita novo DirectorySearcher redundante)
+        $templates | ForEach-Object {
             $tName = $_.Properties["name"][0]
             $nflag = $_.Properties["msPKI-Certificate-Name-Flag"]
             # CT_FLAG_NO_SECURITY_EXTENSION = 0x80000 (bit 19)
@@ -1844,7 +1827,8 @@ function Invoke-ModernChecks {
         @{ N="SeEnableDelegationPrivilege";  S="HIGH"; D="configurar delegacao Kerberos irrestrita" },
         @{ N="SeManageVolumePrivilege";      S="HIGH"; D="modificar volumes diretamente (bypass permissions)" }
     )
-    $privOut = whoami /priv 2>&1
+    $whoamiAll = whoami /all 2>&1
+    $privOut   = $whoamiAll
     foreach ($p in $privs) {
         $line = $privOut | Where-Object { $_ -match $p.N }
         if ($line -and $line -match "Enabled") {
@@ -1942,10 +1926,9 @@ function Invoke-ModernChecks {
 
     W-Sub "Tokens de acesso — grupos de alto privilegio"
     try {
-        $groups = whoami /groups 2>&1
         @("S-1-5-32-544","S-1-5-18","Domain Admins","Enterprise Admins","Schema Admins","Backup Operators","Print Operators") |
         ForEach-Object {
-            if ($groups -match $_) { W-High "Token: membro de grupo privilegiado: $_" }
+            if ($whoamiAll -match $_) { W-High "Token: membro de grupo privilegiado: $_" }
         }
     } catch {}
 
@@ -2053,10 +2036,17 @@ function Invoke-CVEChecks {
         } catch {}
     }
 
-    # CVE-2021-36934 (HiveNightmare/SeriousSAM): builds 17763-19045 (Win10 1809 ate 22H2) + Win11 inicial (22000)
-    if ($buildKnown -and $osBuild -ge 17763 -and $osBuild -le 22000) {
+    # CVE-2021-36934 (HiveNightmare/SeriousSAM): Win10 builds 17763-19045, Win11 build 22000
+    if ($buildKnown -and $osBuild -ge 17763 -and $osBuild -lt 22000) {
+        # Win10: KB5004569 (1809/20H1) ou KB5004570 (20H2/21H1)
         if (-not $hkSet.Contains("KB5004569") -and -not $hkSet.Contains("KB5004570")) {
-            W-Crit "CVE-2021-36934 (HiveNightmare/SeriousSAM) — Build $osBuild sem KB5004569 — SAM legivel por usuario comum"
+            W-Crit "CVE-2021-36934 (HiveNightmare/SeriousSAM) — Build $osBuild sem KB5004569/KB5004570 — SAM legivel por usuario comum"
+            W-Hint "reg save HKLM\SAM C:\Temp\sam.hive ; reg save HKLM\SYSTEM C:\Temp\sys.hive ; impacket-secretsdump -sam sam.hive -system sys.hive LOCAL"
+        }
+    } elseif ($buildKnown -and $osBuild -eq 22000) {
+        # Win11 21H2: KB5004300 ou KB5005094
+        if (-not $hkSet.Contains("KB5004300") -and -not $hkSet.Contains("KB5005094")) {
+            W-Crit "CVE-2021-36934 (HiveNightmare/SeriousSAM) — Win11 Build $osBuild sem KB5004300/KB5005094 — SAM legivel por usuario comum"
             W-Hint "reg save HKLM\SAM C:\Temp\sam.hive ; reg save HKLM\SYSTEM C:\Temp\sys.hive ; impacket-secretsdump -sam sam.hive -system sys.hive LOCAL"
         }
     }
